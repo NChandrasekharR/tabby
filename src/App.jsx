@@ -24,6 +24,7 @@ const parseNum = (s) => {
 };
 
 const STORAGE_KEY = "tabby.v1";
+const HISTORY_KEY = "tabby.history.v1";
 
 function makeSeed() {
   const people = [
@@ -54,6 +55,18 @@ function loadState() {
   }
 }
 
+// Saved-bill history (separate from the live draft).
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const h = JSON.parse(raw);
+    return Array.isArray(h) ? h : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function App() {
   const seed = useMemo(makeSeed, []);
   const saved = useMemo(loadState, []);
@@ -72,6 +85,22 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [today] = useState(() => new Date());
 
+  // Bill history + slide-in panel.
+  const [history, setHistory] = useState(loadHistory);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  // PWA install prompt (Android/desktop) + iOS detection.
+  const [installEvt, setInstallEvt] = useState(null);
+  const [isIOS] = useState(
+    () =>
+      typeof navigator !== "undefined" &&
+      /iphone|ipad|ipod/i.test(navigator.userAgent) &&
+      !window.matchMedia("(display-mode: standalone)").matches &&
+      !window.navigator.standalone
+  );
+  const [showIOSHint, setShowIOSHint] = useState(false);
+
   // Persist everything that matters whenever it changes.
   useEffect(() => {
     try {
@@ -86,6 +115,30 @@ export default function App() {
       /* storage unavailable (private mode / quota) — ignore */
     }
   }, [billName, currency, mode, people, items, totalAmount, taxVal, taxMode, tipVal, tipMode]);
+
+  // Persist the saved-bill history.
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch {
+      /* storage unavailable — ignore */
+    }
+  }, [history]);
+
+  // Capture the install prompt so we can offer an in-app "Install app" button.
+  useEffect(() => {
+    const onPrompt = (e) => {
+      e.preventDefault();
+      setInstallEvt(e);
+    };
+    const onInstalled = () => setInstallEvt(null);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
 
   const dateStr = today.toLocaleDateString("en-IN", {
     day: "2-digit", month: "short", year: "numeric",
@@ -238,6 +291,69 @@ export default function App() {
     }
   };
 
+  /* ---------- history ---------- */
+  // Snapshot the current bill into history (newest first).
+  const saveBill = () => {
+    const entry = {
+      id: uid(),
+      savedAt: new Date().toISOString(),
+      total: computed.grand,
+      peopleCount: people.length,
+      bill: {
+        billName, currency, mode, people, items,
+        totalAmount, taxVal, taxMode, tipVal, tipMode,
+      },
+    };
+    setHistory((h) => [entry, ...h]);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1600);
+  };
+
+  // Restore a saved bill into the live worksheet.
+  const loadBill = (entry) => {
+    const b = entry.bill;
+    setBillName(b.billName ?? "");
+    setCurrency(b.currency ?? "₹");
+    setMode(b.mode ?? "itemized");
+    setPeople(b.people ?? []);
+    setItems(b.items ?? []);
+    setTotalAmount(b.totalAmount ?? "");
+    setTaxVal(b.taxVal ?? "");
+    setTaxMode(b.taxMode ?? "pct");
+    setTipVal(b.tipVal ?? "");
+    setTipMode(b.tipMode ?? "pct");
+    setHistoryOpen(false);
+  };
+
+  const deleteBill = (id) => setHistory((h) => h.filter((e) => e.id !== id));
+
+  /* ---------- install ---------- */
+  const installApp = async () => {
+    if (installEvt) {
+      installEvt.prompt();
+      try {
+        await installEvt.userChoice;
+      } catch {
+        /* ignore */
+      }
+      setInstallEvt(null);
+    } else if (isIOS) {
+      setShowIOSHint((v) => !v);
+    }
+  };
+
+  const canInstall = !!installEvt || isIOS;
+
+  const fmtSavedDate = (iso) => {
+    try {
+      return new Date(iso).toLocaleDateString("en-IN", {
+        day: "2-digit", month: "short", year: "numeric",
+      });
+    } catch {
+      return "";
+    }
+  };
+
   const hasPeople = people.length > 0;
   const ready =
     hasPeople && (mode === "itemized" ? computed.counted.length > 0 : parseNum(totalAmount) > 0);
@@ -276,9 +392,23 @@ export default function App() {
                 ))}
               </select>
             </label>
+            {canInstall && (
+              <button className="bs-ghost" onClick={installApp}>Install app</button>
+            )}
+            <button className="bs-ghost" onClick={() => setHistoryOpen(true)}>
+              History{history.length ? ` · ${history.length}` : ""}
+            </button>
             <button className="bs-ghost" onClick={resetAll}>New tab</button>
           </div>
         </header>
+
+        {showIOSHint && isIOS && (
+          <div className="bs-ios-hint" role="note">
+            To install: tap the <strong>Share</strong> icon in Safari, then{" "}
+            <strong>Add to Home Screen</strong>.
+            <button className="bs-x" onClick={() => setShowIOSHint(false)} aria-label="Dismiss">×</button>
+          </div>
+        )}
 
         <div className="bs-grid">
           {/* ================= WORKSHEET ================= */}
@@ -532,9 +662,14 @@ export default function App() {
                     THANK YOU
                   </div>
 
-                  <button className="bs-copy" onClick={copySplit}>
-                    {copied ? "Copied to clipboard" : "Copy split"}
-                  </button>
+                  <div className="bs-r-actions">
+                    <button className="bs-copy" onClick={copySplit}>
+                      {copied ? "Copied to clipboard" : "Copy split"}
+                    </button>
+                    <button className="bs-copy ghost" onClick={saveBill}>
+                      {justSaved ? "Saved to history" : "Save bill"}
+                    </button>
+                  </div>
                 </>
               )}
               <Perf bottom />
@@ -542,6 +677,58 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* ================= HISTORY PANEL ================= */}
+      {historyOpen && (
+        <div className="bs-overlay" onClick={() => setHistoryOpen(false)}>
+          <aside
+            className="bs-panel"
+            role="dialog"
+            aria-label="Saved bills"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bs-panel-head">
+              <div className="bs-eyebrow">Saved bills</div>
+              <button
+                className="bs-x big"
+                onClick={() => setHistoryOpen(false)}
+                aria-label="Close history"
+              >×</button>
+            </div>
+            {history.length === 0 ? (
+              <p className="bs-hint">
+                No saved bills yet. Tap <strong>Save bill</strong> on a receipt to keep it here.
+              </p>
+            ) : (
+              <ul className="bs-history">
+                {history.map((e) => (
+                  <li key={e.id} className="bs-hentry">
+                    <button className="bs-hentry-main" onClick={() => loadBill(e)}>
+                      <span className="bs-hentry-name">{e.bill.billName || "Untitled"}</span>
+                      <span className="bs-hentry-meta">
+                        {fmtSavedDate(e.savedAt)} · {e.peopleCount}{" "}
+                        {e.peopleCount === 1 ? "guest" : "guests"}
+                      </span>
+                      <span className="bs-hentry-total">
+                        {(e.bill.currency || "₹") +
+                          (isFinite(e.total) ? e.total : 0).toLocaleString(
+                            e.bill.currency === "₹" ? "en-IN" : "en-US",
+                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                          )}
+                      </span>
+                    </button>
+                    <button
+                      className="bs-x"
+                      onClick={() => deleteBill(e.id)}
+                      aria-label={`Delete ${e.bill.billName || "bill"}`}
+                    >×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
@@ -740,8 +927,31 @@ const CSS = `
 .bs-barcode{ height:46px; margin:18px 0 6px; background-image:repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 9px, var(--ink) 9px 11px, transparent 11px 13px, var(--ink) 13px 16px, transparent 16px 18px); opacity:.82; }
 .bs-r-foot{ text-align:center; font-size:10px; letter-spacing:.18em; color:var(--muted); padding-bottom:8px; }
 
-.bs-copy{ width:100%; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:8px; padding:13px; cursor:pointer; margin:6px 0 4px; transition:.15s; }
+.bs-r-actions{ display:flex; gap:8px; margin:6px 0 4px; }
+.bs-copy{ flex:1; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:8px; padding:13px; cursor:pointer; transition:.15s; }
 .bs-copy:hover{ background:transparent; color:var(--ink); }
+.bs-copy.ghost{ background:transparent; color:var(--ink); }
+.bs-copy.ghost:hover{ background:var(--ink); color:var(--receipt); }
+
+/* iOS install hint */
+.bs-ios-hint{ position:relative; font-family:var(--mono); font-size:12.5px; line-height:1.5; color:var(--ink); background:var(--receipt); border:1px solid var(--line); border-radius:10px; padding:12px 36px 12px 14px; margin:0 0 20px; }
+.bs-ios-hint .bs-x{ position:absolute; top:8px; right:8px; }
+
+/* history panel */
+.bs-overlay{ position:fixed; inset:0; z-index:50; background:rgba(32,32,28,.34); display:flex; justify-content:flex-end; animation:bs-fade .15s ease; }
+.bs-panel{ width:min(380px,90vw); height:100%; background:var(--paper); border-left:1px solid var(--line); box-shadow:-24px 0 50px -34px rgba(0,0,0,.6); padding:clamp(16px,4vw,24px); overflow-y:auto; animation:bs-slide .2s ease; }
+.bs-panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.bs-panel-head .bs-eyebrow{ margin-bottom:0; }
+.bs-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.bs-hentry{ display:flex; align-items:stretch; gap:6px; border:1px solid var(--line); border-radius:12px; background:var(--receipt); overflow:hidden; }
+.bs-hentry-main{ flex:1; display:grid; grid-template-columns:1fr auto; grid-template-areas:"name total" "meta total"; align-items:center; gap:0 10px; text-align:left; border:none; background:transparent; padding:12px 6px 12px 14px; cursor:pointer; transition:background .12s; }
+.bs-hentry-main:hover{ background:#fff; }
+.bs-hentry-name{ grid-area:name; font-family:var(--disp); font-weight:600; font-size:15px; }
+.bs-hentry-meta{ grid-area:meta; font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:2px; }
+.bs-hentry-total{ grid-area:total; font-family:var(--mono); font-size:15px; font-variant-numeric:tabular-nums; }
+.bs-hentry > .bs-x{ padding:0 12px; }
+@keyframes bs-fade{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes bs-slide{ from{ transform:translateX(16px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
 
 .bs input:focus-visible, .bs button:focus-visible, .bs select:focus-visible{ outline:2px solid var(--pen); outline-offset:2px; }
 
@@ -749,5 +959,5 @@ const CSS = `
   .bs-tt{ grid-template-columns:1fr; }
   .bs-stamp{ bottom:104px; right:10px; }
 }
-@media(prefers-reduced-motion:reduce){ .bs *{ transition:none !important; } }
+@media(prefers-reduced-motion:reduce){ .bs *{ transition:none !important; } .bs-overlay, .bs-panel{ animation:none !important; } }
 `;
