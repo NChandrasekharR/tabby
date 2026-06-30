@@ -164,13 +164,18 @@ export default function App() {
     };
   }, []);
 
-  // Lock body scroll while the immersive onboarding is open.
+  // Lock body scroll while the immersive onboarding is open, and reset to the
+  // top of the bill once it closes (the keyboard can leave the page scrolled).
   useEffect(() => {
     if (!onboarding) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
+      // Reset now and again next frame — the virtual keyboard can re-scroll
+      // the page as it collapses after the overlay unmounts.
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => window.scrollTo(0, 0));
     };
   }, [onboarding]);
 
