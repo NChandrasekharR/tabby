@@ -164,6 +164,16 @@ export default function App() {
     };
   }, []);
 
+  // Lock body scroll while the immersive onboarding is open.
+  useEffect(() => {
+    if (!onboarding) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [onboarding]);
+
   const dateStr = today.toLocaleDateString("en-IN", {
     day: "2-digit", month: "short", year: "numeric",
   });
@@ -1118,14 +1128,28 @@ const CSS = `
 @keyframes bs-fade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes bs-slide{ from{ transform:translateX(16px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
 
-/* onboarding */
-.bs-onboard{ position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(32,32,28,.42); animation:bs-fade .18s ease; }
-.bs-onboard-card{ width:min(420px,100%); background:var(--receipt); border:1px solid var(--line); border-radius:18px; padding:clamp(22px,5vw,32px); box-shadow:0 30px 60px -30px rgba(0,0,0,.6); animation:bs-pop .22s ease; }
+/* onboarding — immersive, full-bleed (covers safe-area insets in PWA) */
+.bs-onboard{
+  position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  height:100dvh; background:var(--paper); overflow-y:auto; animation:bs-fade .18s ease;
+  padding:max(24px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right))
+          max(24px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
+}
+/* same paper grain as the app, so the opaque backdrop isn't a flat block */
+.bs-onboard::before{
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+.bs-onboard-card{
+  position:relative; width:min(420px,100%); background:var(--receipt); border:1px solid var(--line);
+  border-radius:18px; padding:clamp(22px,5vw,32px); box-shadow:0 30px 60px -34px rgba(32,32,28,.45);
+  animation:bs-pop .22s ease;
+}
 .bs-onboard-card .bs-mark.big{ display:block; font-size:38px; color:var(--pen); margin-bottom:8px; }
 .bs-onboard-card h2{ font-family:var(--disp); font-weight:700; font-size:22px; letter-spacing:-.02em; margin:0 0 6px; }
 .bs-onboard-sub{ font-family:var(--mono); font-size:13px; line-height:1.55; color:var(--muted); margin:0 0 18px; }
 .bs-onboard-field{ display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; padding:0 6px 0 14px; }
-.bs-onboard-field input{ flex:1; border:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
+.bs-onboard-field input{ flex:1; min-width:0; border:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
 .bs-onboard-field input:focus-visible{ outline:none; }
 .bs-onboard-add{ border:none; background:transparent; font-size:22px; color:var(--pen); cursor:pointer; padding:4px 10px 6px; }
 .bs-onboard-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
@@ -1134,6 +1158,14 @@ const CSS = `
 .bs-onboard-btn:disabled{ opacity:.4; cursor:not-allowed; }
 .bs-onboard-skip{ width:100%; margin-top:8px; font-family:var(--mono); font-size:12px; border:none; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
 .bs-onboard-skip:hover{ color:var(--ink); }
+/* on phones, go edge-to-edge: no floating card, just immersive content */
+@media(max-width:560px){
+  .bs-onboard{ align-items:stretch; padding:0; }
+  .bs-onboard-card{ width:100%; max-width:none; border:none; border-radius:0; box-shadow:none; background:transparent; display:flex; flex-direction:column; justify-content:center; padding:max(28px,env(safe-area-inset-top)) 24px max(28px,env(safe-area-inset-bottom)); }
+  .bs-onboard-card .bs-mark.big{ font-size:44px; }
+  .bs-onboard-card h2{ font-size:26px; }
+  .bs-onboard-sub{ font-size:14px; }
+}
 @keyframes bs-pop{ from{ transform:translateY(10px) scale(.98); opacity:.5; } to{ transform:translateY(0) scale(1); opacity:1; } }
 
 .bs input:focus-visible, .bs button:focus-visible, .bs select:focus-visible{ outline:2px solid var(--pen); outline-offset:2px; }
