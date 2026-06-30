@@ -25,6 +25,7 @@ const parseNum = (s) => {
 
 const STORAGE_KEY = "tabby.v1";
 const HISTORY_KEY = "tabby.history.v1";
+const ONBOARD_KEY = "tabby.onboarded.v1";
 
 function makeSeed() {
   const people = [
@@ -40,6 +41,25 @@ function makeSeed() {
     { id: uid(), name: "Butter Naan ×2", price: "120", split: "assigned", assignedTo: ["p1", "p2"] },
   ];
   return { people, items };
+}
+
+// Demo items for a fresh group — all Shared so they don't reference seed IDs.
+function demoItems() {
+  return [
+    { id: uid(), name: "Paneer Tikka", price: "340", split: "shared", assignedTo: [] },
+    { id: uid(), name: "Lime Soda ×3", price: "240", split: "shared", assignedTo: [] },
+    { id: uid(), name: "Veg Biryani", price: "280", split: "shared", assignedTo: [] },
+    { id: uid(), name: "Masala Dosa", price: "180", split: "shared", assignedTo: [] },
+    { id: uid(), name: "Butter Naan ×2", price: "120", split: "shared", assignedTo: [] },
+  ];
+}
+
+function hasOnboarded() {
+  try {
+    return localStorage.getItem(ONBOARD_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 // Load persisted state (or null). Returns a partial state object.
@@ -89,6 +109,10 @@ export default function App() {
   const [history, setHistory] = useState(loadHistory);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+
+  // First-run onboarding (only when there's no saved draft and never onboarded).
+  const [onboarding, setOnboarding] = useState(() => !saved && !hasOnboarded());
+  const [shared, setShared] = useState(false);
 
   // PWA install prompt (Android/desktop) + iOS detection.
   const [installEvt, setInstallEvt] = useState(null);
@@ -344,6 +368,51 @@ export default function App() {
 
   const canInstall = !!installEvt || isIOS;
 
+  /* ---------- onboarding ---------- */
+  // names: ordered list (user first, then friends). Seeds people + keeps demo items.
+  const finishOnboarding = (names) => {
+    const clean = names.map((n) => n.trim()).filter(Boolean);
+    const seededPeople = clean.map((name, idx) => ({
+      id: uid(),
+      name,
+      color: PALETTE[idx % PALETTE.length],
+    }));
+    setPeople(seededPeople);
+    setItems(demoItems());
+    setMode("itemized");
+    try {
+      localStorage.setItem(ONBOARD_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+    setOnboarding(false);
+  };
+
+  /* ---------- share ---------- */
+  const shareApp = async () => {
+    const url = window.location.origin || window.location.href;
+    const data = {
+      title: "Tabby",
+      text: "Split the bill like a receipt — who had what, who owes what.",
+      url,
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(data);
+        return;
+      } catch {
+        /* user cancelled or share failed — fall through to copy */
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+      setTimeout(() => setShared(false), 1600);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
   const fmtSavedDate = (iso) => {
     try {
       return new Date(iso).toLocaleDateString("en-IN", {
@@ -374,6 +443,8 @@ export default function App() {
     <div className="bs">
       <style>{CSS}</style>
 
+      {onboarding && <Onboarding onDone={finishOnboarding} />}
+
       <div className="bs-shell">
         {/* ---------------- header ---------------- */}
         <header className="bs-head">
@@ -395,6 +466,9 @@ export default function App() {
             {canInstall && (
               <button className="bs-ghost" onClick={installApp}>Install app</button>
             )}
+            <button className="bs-ghost" onClick={shareApp}>
+              {shared ? "Link copied" : "Share"}
+            </button>
             <button className="bs-ghost" onClick={() => setHistoryOpen(true)}>
               History{history.length ? ` · ${history.length}` : ""}
             </button>
@@ -733,6 +807,97 @@ export default function App() {
   );
 }
 
+/* first-run onboarding */
+function Onboarding({ onDone }) {
+  const [step, setStep] = useState(0);          // 0 = your name, 1 = friends
+  const [me, setMe] = useState("");
+  const [friends, setFriends] = useState([]);
+  const [draft, setDraft] = useState("");
+
+  const addFriend = () => {
+    const n = draft.trim();
+    if (!n) return;
+    setFriends((f) => [...f, n]);
+    setDraft("");
+  };
+  const removeFriend = (idx) => setFriends((f) => f.filter((_, i) => i !== idx));
+
+  const goNext = () => {
+    if (!me.trim()) return;
+    setStep(1);
+  };
+  const finish = () => {
+    // commit any half-typed friend, then seed: me first, then friends.
+    const pending = draft.trim();
+    const all = [me, ...friends, ...(pending ? [pending] : [])];
+    onDone(all);
+  };
+
+  return (
+    <div className="bs-onboard">
+      <div className="bs-onboard-card">
+        <span className="bs-mark big">⊟</span>
+        {step === 0 ? (
+          <>
+            <h2>Welcome to Tabby</h2>
+            <p className="bs-onboard-sub">Split any bill like a receipt. First — what's your name?</p>
+            <div className="bs-onboard-field">
+              <input
+                autoFocus
+                value={me}
+                onChange={(e) => setMe(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && goNext()}
+                placeholder="Your name"
+                aria-label="Your name"
+              />
+            </div>
+            <button className="bs-onboard-btn" onClick={goNext} disabled={!me.trim()}>
+              Next
+            </button>
+          </>
+        ) : (
+          <>
+            <h2>Who are you splitting with?</h2>
+            <p className="bs-onboard-sub">
+              Add the friends you're eating out with. You can always add more later.
+            </p>
+            <div className="bs-onboard-field">
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addFriend()}
+                placeholder="Friend's name"
+                aria-label="Friend's name"
+              />
+              <button className="bs-onboard-add" onClick={addFriend} aria-label="Add friend">+</button>
+            </div>
+            <div className="bs-onboard-chips">
+              <span className="bs-chip person">
+                <span className="bs-dot" style={{ background: PALETTE[0] }} />
+                {me.trim() || "You"}
+              </span>
+              {friends.map((f, idx) => (
+                <span className="bs-chip person" key={idx}>
+                  <span className="bs-dot" style={{ background: PALETTE[(idx + 1) % PALETTE.length] }} />
+                  {f}
+                  <button className="bs-x" onClick={() => removeFriend(idx)} aria-label={`Remove ${f}`}>×</button>
+                </span>
+              ))}
+            </div>
+            <button className="bs-onboard-btn" onClick={finish}>
+              Start splitting
+            </button>
+            <button className="bs-onboard-skip" onClick={() => onDone([me])}>
+              Just me for now
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* tax / tip control */
 function Adjuster({ label, value, setValue, mode, setMode, currency, quick }) {
   return (
@@ -953,11 +1118,29 @@ const CSS = `
 @keyframes bs-fade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes bs-slide{ from{ transform:translateX(16px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
 
+/* onboarding */
+.bs-onboard{ position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(32,32,28,.42); animation:bs-fade .18s ease; }
+.bs-onboard-card{ width:min(420px,100%); background:var(--receipt); border:1px solid var(--line); border-radius:18px; padding:clamp(22px,5vw,32px); box-shadow:0 30px 60px -30px rgba(0,0,0,.6); animation:bs-pop .22s ease; }
+.bs-onboard-card .bs-mark.big{ display:block; font-size:38px; color:var(--pen); margin-bottom:8px; }
+.bs-onboard-card h2{ font-family:var(--disp); font-weight:700; font-size:22px; letter-spacing:-.02em; margin:0 0 6px; }
+.bs-onboard-sub{ font-family:var(--mono); font-size:13px; line-height:1.55; color:var(--muted); margin:0 0 18px; }
+.bs-onboard-field{ display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; padding:0 6px 0 14px; }
+.bs-onboard-field input{ flex:1; border:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
+.bs-onboard-field input:focus-visible{ outline:none; }
+.bs-onboard-add{ border:none; background:transparent; font-size:22px; color:var(--pen); cursor:pointer; padding:4px 10px 6px; }
+.bs-onboard-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.bs-onboard-btn{ width:100%; margin-top:18px; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:9px; padding:14px; cursor:pointer; transition:.15s; }
+.bs-onboard-btn:hover:not(:disabled){ background:transparent; color:var(--ink); }
+.bs-onboard-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.bs-onboard-skip{ width:100%; margin-top:8px; font-family:var(--mono); font-size:12px; border:none; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
+.bs-onboard-skip:hover{ color:var(--ink); }
+@keyframes bs-pop{ from{ transform:translateY(10px) scale(.98); opacity:.5; } to{ transform:translateY(0) scale(1); opacity:1; } }
+
 .bs input:focus-visible, .bs button:focus-visible, .bs select:focus-visible{ outline:2px solid var(--pen); outline-offset:2px; }
 
 @media(max-width:520px){
   .bs-tt{ grid-template-columns:1fr; }
   .bs-stamp{ bottom:104px; right:10px; }
 }
-@media(prefers-reduced-motion:reduce){ .bs *{ transition:none !important; } .bs-overlay, .bs-panel{ animation:none !important; } }
+@media(prefers-reduced-motion:reduce){ .bs *{ transition:none !important; } .bs-overlay, .bs-panel, .bs-onboard, .bs-onboard-card{ animation:none !important; } }
 `;
