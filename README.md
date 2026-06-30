@@ -1,5 +1,7 @@
 # Tabby
 
+<img width="600" height="315" alt="og" src="https://github.com/user-attachments/assets/225d1171-c561-4b4d-a34d-6ef5afbb211c" />
+
 A bill splitter built like a receipt. Who had what — who owes what.
 
 - **Itemize** each line and mark it *Shared* (split across everyone) or *Assigned* (tap who had it).
