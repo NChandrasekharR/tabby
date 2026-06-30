@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" result="n"/>
+      <feColorMatrix in="n" type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.04"/></feComponentTransfer>
+    </filter>
+    <filter id="drop" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="34" flood-color="#20201C" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- paper background -->
+  <rect width="1200" height="630" fill="#ECEBE3"/>
+  <rect width="1200" height="630" filter="url(#grain)" opacity="0.5"/>
+
+  <!-- left: wordmark + copy -->
+  <g transform="translate(96 150)">
+    <!-- ⊟ mark -->
+    <g transform="translate(0 0)" fill="none" stroke="#2E3A66" stroke-width="6" stroke-linecap="round">
+      <rect x="2" y="2" width="60" height="58" rx="10"/>
+      <line x1="2" y1="31" x2="62" y2="31"/>
+    </g>
+    <text x="84" y="48" font-family="'Space Grotesk', system-ui, sans-serif" font-size="58" font-weight="700" fill="#20201C" letter-spacing="-1">Tabby</text>
+
+    <text x="0" y="150" font-family="'Space Grotesk', system-ui, sans-serif" font-size="64" font-weight="700" fill="#20201C" letter-spacing="-1.5">Split the bill</text>
+    <text x="0" y="226" font-family="'Space Grotesk', system-ui, sans-serif" font-size="64" font-weight="700" fill="#20201C" letter-spacing="-1.5">like a receipt.</text>
+
+    <text x="2" y="296" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="26" fill="#8C897C" letter-spacing="0.5">Who had what — who owes what.</text>
+  </g>
+
+  <!-- right: mini receipt -->
+  <g transform="translate(760 96)" filter="url(#drop)">
+    <rect width="344" height="438" rx="8" fill="#F8F7F2"/>
+    <!-- perforation top -->
+    <g fill="#ECEBE3"><circle cx="0" cy="0" r="12"/><circle cx="344" cy="0" r="12"/></g>
+
+    <text x="172" y="58" text-anchor="middle" font-family="'Space Grotesk', system-ui, sans-serif" font-size="22" font-weight="700" fill="#20201C" letter-spacing="2">DINNER</text>
+    <text x="172" y="84" text-anchor="middle" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="13" fill="#8C897C" letter-spacing="1">3 GUESTS · ITEMIZED</text>
+
+    <line x1="28" y1="108" x2="316" y2="108" stroke="#CFCCC0" stroke-width="1" stroke-dasharray="3 4"/>
+
+    <g font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="20" fill="#20201C">
+      <g transform="translate(28 150)">
+        <circle cx="6" cy="-6" r="6" fill="#2E3A66"/>
+        <text x="22" y="0" font-weight="600">Riya</text>
+        <text x="288" y="0" text-anchor="end" font-weight="600">₹422</text>
+      </g>
+      <g transform="translate(28 200)">
+        <circle cx="6" cy="-6" r="6" fill="#B5362A"/>
+        <text x="22" y="0" font-weight="600">Arjun</text>
+        <text x="288" y="0" text-anchor="end" font-weight="600">₹486</text>
+      </g>
+      <g transform="translate(28 250)">
+        <circle cx="6" cy="-6" r="6" fill="#3E7C5A"/>
+        <text x="22" y="0" font-weight="600">Sam</text>
+        <text x="288" y="0" text-anchor="end" font-weight="600">₹310</text>
+      </g>
+    </g>
+
+    <line x1="28" y1="288" x2="316" y2="288" stroke="#20201C" stroke-width="1.5" opacity="0.7"/>
+    <g transform="translate(28 326)" font-family="'IBM Plex Mono', ui-monospace, monospace" font-size="22">
+      <text x="0" y="0" fill="#20201C" font-weight="600">TOTAL</text>
+      <text x="288" y="0" text-anchor="end" fill="#B5362A" font-weight="700">₹1,218</text>
+    </g>
+
+    <!-- barcode -->
+    <g transform="translate(28 366)" fill="#20201C" opacity="0.82">
+      <rect x="0" y="0" width="3" height="40"/><rect x="6" y="0" width="2" height="40"/>
+      <rect x="12" y="0" width="4" height="40"/><rect x="20" y="0" width="2" height="40"/>
+      <rect x="26" y="0" width="3" height="40"/><rect x="34" y="0" width="5" height="40"/>
+      <rect x="44" y="0" width="2" height="40"/><rect x="50" y="0" width="3" height="40"/>
+      <rect x="58" y="0" width="2" height="40"/><rect x="64" y="0" width="4" height="40"/>
+      <rect x="74" y="0" width="2" height="40"/><rect x="80" y="0" width="3" height="40"/>
+      <rect x="88" y="0" width="5" height="40"/><rect x="98" y="0" width="2" height="40"/>
+      <rect x="104" y="0" width="3" height="40"/><rect x="112" y="0" width="2" height="40"/>
+      <rect x="118" y="0" width="4" height="40"/><rect x="126" y="0" width="3" height="40"/>
+      <rect x="134" y="0" width="2" height="40"/><rect x="140" y="0" width="5" height="40"/>
+      <rect x="150" y="0" width="2" height="40"/><rect x="156" y="0" width="3" height="40"/>
+      <rect x="164" y="0" width="4" height="40"/><rect x="172" y="0" width="2" height="40"/>
+      <rect x="178" y="0" width="3" height="40"/><rect x="186" y="0" width="2" height="40"/>
+      <rect x="192" y="0" width="5" height="40"/><rect x="202" y="0" width="3" height="40"/>
+      <rect x="210" y="0" width="2" height="40"/><rect x="216" y="0" width="4" height="40"/>
+      <rect x="224" y="0" width="2" height="40"/><rect x="230" y="0" width="3" height="40"/>
+      <rect x="238" y="0" width="5" height="40"/><rect x="248" y="0" width="2" height="40"/>
+      <rect x="254" y="0" width="3" height="40"/><rect x="262" y="0" width="4" height="40"/>
+      <rect x="270" y="0" width="2" height="40"/><rect x="276" y="0" width="3" height="40"/>
+      <rect x="284" y="0" width="4" height="40"/>
+    </g>
+  </g>
+</svg>
