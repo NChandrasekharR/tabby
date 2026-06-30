@@ -17,7 +17,7 @@ export default defineConfig({
         name: 'Tabby — Bill Splitter',
         short_name: 'Tabby',
         description: 'Split the bill like a receipt. Who had what — who owes what.',
-        theme_color: '#2E3A66',
+        theme_color: '#ECEBE3',
         background_color: '#ECEBE3',
         display: 'standalone',
         orientation: 'portrait',

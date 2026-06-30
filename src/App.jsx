@@ -959,7 +959,8 @@ function hashStr(s) {
 }
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+/* paint the whole page (incl. area behind the status bar / browser chrome) beige */
+html, body, #root{ background:#ECEBE3; }
 
 .bs {
   --paper:#ECEBE3; --ink:#20201C; --pen:#2E3A66; --stamp:#B5362A;
@@ -1148,9 +1149,11 @@ const CSS = `
 .bs-onboard-card .bs-mark.big{ display:block; font-size:38px; color:var(--pen); margin-bottom:8px; }
 .bs-onboard-card h2{ font-family:var(--disp); font-weight:700; font-size:22px; letter-spacing:-.02em; margin:0 0 6px; }
 .bs-onboard-sub{ font-family:var(--mono); font-size:13px; line-height:1.55; color:var(--muted); margin:0 0 18px; }
-.bs-onboard-field{ display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; padding:0 6px 0 14px; }
-.bs-onboard-field input{ flex:1; min-width:0; border:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
-.bs-onboard-field input:focus-visible{ outline:none; }
+.bs-onboard-field{ display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; padding:0 6px 0 14px; transition:border-color .15s, box-shadow .15s; }
+/* highlight the wrapper on focus, not the inner input — avoids a double outline */
+.bs-onboard-field:focus-within{ border-color:var(--pen); box-shadow:0 0 0 3px rgba(46,58,102,.16); }
+.bs-onboard-field input{ flex:1; min-width:0; border:none; outline:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
+.bs-onboard-field input:focus, .bs-onboard-field input:focus-visible{ outline:none; }
 .bs-onboard-add{ border:none; background:transparent; font-size:22px; color:var(--pen); cursor:pointer; padding:4px 10px 6px; }
 .bs-onboard-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
 .bs-onboard-btn{ width:100%; margin-top:18px; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:9px; padding:14px; cursor:pointer; transition:.15s; }
@@ -1169,6 +1172,9 @@ const CSS = `
 @keyframes bs-pop{ from{ transform:translateY(10px) scale(.98); opacity:.5; } to{ transform:translateY(0) scale(1); opacity:1; } }
 
 .bs input:focus-visible, .bs button:focus-visible, .bs select:focus-visible{ outline:2px solid var(--pen); outline-offset:2px; }
+/* inputs wrapped in a field that shows its own focus style shouldn't also get the blanket ring */
+.bs-onboard-field input:focus, .bs-onboard-field input:focus-visible,
+.bs-amount input:focus, .bs-amount input:focus-visible{ outline:none; }
 
 @media(max-width:520px){
   .bs-tt{ grid-template-columns:1fr; }
