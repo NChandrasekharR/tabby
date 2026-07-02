@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { computeSplit, parseNum } from "./lib/split";
 
 /* ------------------------------------------------------------------ *
  * Tabby — a bill splitter built like a receipt.
@@ -18,10 +19,6 @@ const PALETTE = [
 const CURRENCIES = ["₹", "$", "€", "£", "¥"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-const parseNum = (s) => {
-  const n = parseFloat(String(s).replace(/[^0-9.]/g, ""));
-  return isFinite(n) ? n : 0;
-};
 
 const STORAGE_KEY = "tabby.v1";
 const HISTORY_KEY = "tabby.history.v1";
@@ -268,73 +265,17 @@ export default function App() {
     resetAll();
   };
 
-  /* ---------- math ---------- */
-  const computed = useMemo(() => {
-    const allIds = people.map((p) => p.id);
-    const resolved = items.map((i) => {
-      const priceNum = parseNum(i.price);
-      const assignees =
-        i.split === "shared" ? allIds : i.assignedTo.filter((id) => allIds.includes(id));
-      return { ...i, priceNum, assignees };
-    });
-    const counted = resolved.filter((i) => i.priceNum > 0 && i.assignees.length > 0);
-    const unassigned = resolved.filter(
-      (i) => i.priceNum > 0 && i.assignees.length === 0 && i.split === "assigned"
-    );
-
-    const perPersonSub = {};
-    people.forEach((p) => (perPersonSub[p.id] = 0));
-
-    let billSubtotal;
-    if (mode === "itemized") {
-      counted.forEach((i) => {
-        const share = i.priceNum / i.assignees.length;
-        i.assignees.forEach((pid) => {
-          if (pid in perPersonSub) perPersonSub[pid] += share;
-        });
-      });
-      billSubtotal = counted.reduce((s, i) => s + i.priceNum, 0);
-    } else {
-      billSubtotal = parseNum(totalAmount);
-      const n = people.length || 1;
-      people.forEach((p) => (perPersonSub[p.id] = billSubtotal / n));
-    }
-
-    const taxValue = taxMode === "pct" ? (billSubtotal * parseNum(taxVal)) / 100 : parseNum(taxVal);
-    const tipValue = tipMode === "pct" ? (billSubtotal * parseNum(tipVal)) / 100 : parseNum(tipVal);
-    const grand = billSubtotal + taxValue + tipValue;
-
-    const breakdown = people.map((p) => {
-      const sub = perPersonSub[p.id] || 0;
-      const ratio = billSubtotal > 0 ? sub / billSubtotal : people.length ? 1 / people.length : 0;
-      const tax = taxValue * ratio;
-      const tip = tipValue * ratio;
-      const lines =
-        mode === "itemized"
-          ? counted
-              .filter((i) => i.assignees.includes(p.id))
-              .map((i) => ({
-                name: i.name || "Item",
-                amt: i.priceNum / i.assignees.length,
-                tag:
-                  i.split === "shared"
-                    ? "shared"
-                    : i.assignees.length > 1
-                    ? `÷${i.assignees.length}`
-                    : "",
-              }))
-          : [];
-      return { ...p, sub, tax, tip, total: sub + tax + tip, lines };
-    });
-
-    return { counted, unassigned, billSubtotal, taxValue, tipValue, grand, breakdown };
-  }, [mode, items, people, totalAmount, taxVal, taxMode, tipVal, tipMode]);
+  /* ---------- math (pure module — see src/lib/split.js + tests) ---------- */
+  const computed = useMemo(
+    () => computeSplit({ mode, items, people, totalAmount, taxVal, taxMode, tipVal, tipMode }),
+    [mode, items, people, totalAmount, taxVal, taxMode, tipVal, tipMode]
+  );
 
   const copySplit = () => {
     const L = [];
     L.push(`${billName || "Bill"} · ${dateStr}`);
     L.push("");
-    computed.breakdown.forEach((b) => L.push(`${(b.name || "—").padEnd(12)} ${fmt(b.total)}`));
+    computed.breakdown.forEach((b) => L.push(`${(b.name || "—").padEnd(12)} ${fmt(b.totalRounded)}`));
     L.push("");
     L.push(`Subtotal ${fmt(computed.billSubtotal)}`);
     if (computed.taxValue) L.push(`Tax      ${fmt(computed.taxValue)}`);
@@ -349,7 +290,7 @@ export default function App() {
         },
         () => {}
       );
-    } catch (e) {
+    } catch {
       /* clipboard unavailable in this context */
     }
   };
@@ -793,7 +734,7 @@ export default function App() {
                   <div className="bs-r-section">
                     {computed.breakdown.map((b) => (
                       <div className="bs-person-block" key={b.id}>
-                        <RRow label={b.name || "—"} value={fmt(b.total)} strong color={b.color} />
+                        <RRow label={b.name || "—"} value={fmt(b.totalRounded)} strong color={b.color} />
                         {b.lines.map((ln, idx) => (
                           <RRow
                             key={idx}
@@ -818,6 +759,14 @@ export default function App() {
                     {computed.tipValue > 0 && <RRow label="Tip" value={fmt(computed.tipValue)} />}
                     <RRow label="TOTAL" value={fmt(computed.grand)} strong red />
                   </div>
+
+                  {computed.roundingAdjustment !== 0 && people[0] && (
+                    <div className="bs-r-note">
+                      {computed.roundingAdjustment > 0 ? "+" : "−"}
+                      {fmt(Math.abs(computed.roundingAdjustment))} rounding goes to{" "}
+                      {people[0].name} so the shares add up exactly.
+                    </div>
+                  )}
 
                   {computed.unassigned.length > 0 && (
                     <div className="bs-warn">
@@ -1234,6 +1183,7 @@ html, body, #root{ background:#ECEBE3; }
 .bs-r-section:last-of-type .bs-rrow:last-child{ font-size:17px; padding-top:6px; }
 
 .bs-warn{ font-size:11px; color:var(--stamp); background:rgba(181,54,42,.07); border:1px solid rgba(181,54,42,.2); border-radius:6px; padding:8px 10px; margin-top:12px; line-height:1.5; }
+.bs-r-note{ font-size:10.5px; color:var(--muted); text-align:center; line-height:1.5; padding:6px 8px 0; }
 
 .bs-stamp{ position:absolute; right:18px; bottom:96px; font-family:var(--disp); font-weight:700; font-size:18px; letter-spacing:.12em; color:var(--stamp); border:2px solid var(--stamp); border-radius:6px; padding:5px 9px; transform:rotate(-9deg); opacity:.16; pointer-events:none; }
 .bs-barcode{ height:46px; margin:18px 0 6px; background-image:repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 9px, var(--ink) 9px 11px, transparent 11px 13px, var(--ink) 13px 16px, transparent 16px 18px); opacity:.82; }
