@@ -1,5 +1,14 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { computeSplit, parseNum } from "./lib/split";
+import {
+  hasOnboarded, markOnboarded, loadState, saveState,
+  loadHistory, saveHistory, buildBackup, mergeHistory,
+} from "./lib/storage";
+import { PALETTE, CURRENCIES, uid } from "./lib/constants";
+import { makeSeed, demoItems } from "./lib/seed";
+import Onboarding from "./components/Onboarding";
+import HistoryPanel from "./components/HistoryPanel";
+import "./styles.css";
 
 /* ------------------------------------------------------------------ *
  * Tabby — a bill splitter built like a receipt.
@@ -9,80 +18,10 @@ import { computeSplit, parseNum } from "./lib/split";
  * Tax + tip distribute proportionally to each person's subtotal.
  * Or skip items entirely and split one total evenly.
  * The result prints as a per-person receipt you can copy to a chat.
+ *
+ * Split math lives in src/lib/split.js (pure, tested);
+ * persistence in src/lib/storage.js.
  * ------------------------------------------------------------------ */
-
-const PALETTE = [
-  "#2E3A66", "#B5362A", "#3E7C5A", "#A8742C",
-  "#6B4E8E", "#2D7A86", "#9C3A6B", "#506236",
-];
-
-const CURRENCIES = ["₹", "$", "€", "£", "¥"];
-
-const uid = () => Math.random().toString(36).slice(2, 9);
-
-const STORAGE_KEY = "tabby.v1";
-const HISTORY_KEY = "tabby.history.v1";
-const ONBOARD_KEY = "tabby.onboarded.v1";
-
-function makeSeed() {
-  const people = [
-    { id: "p1", name: "Riya", color: PALETTE[0] },
-    { id: "p2", name: "Arjun", color: PALETTE[1] },
-    { id: "p3", name: "Sam", color: PALETTE[2] },
-  ];
-  const items = [
-    { id: uid(), name: "Paneer Tikka", price: "340", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Lime Soda ×3", price: "240", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Veg Biryani", price: "280", split: "assigned", assignedTo: ["p2"] },
-    { id: uid(), name: "Masala Dosa", price: "180", split: "assigned", assignedTo: ["p3"] },
-    { id: uid(), name: "Butter Naan ×2", price: "120", split: "assigned", assignedTo: ["p1", "p2"] },
-  ];
-  return { people, items };
-}
-
-// Demo items for a fresh group — all Shared so they don't reference seed IDs.
-function demoItems() {
-  return [
-    { id: uid(), name: "Paneer Tikka", price: "340", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Lime Soda ×3", price: "240", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Veg Biryani", price: "280", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Masala Dosa", price: "180", split: "shared", assignedTo: [] },
-    { id: uid(), name: "Butter Naan ×2", price: "120", split: "shared", assignedTo: [] },
-  ];
-}
-
-function hasOnboarded() {
-  try {
-    return localStorage.getItem(ONBOARD_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-// Load persisted state (or null). Returns a partial state object.
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== "object") return null;
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-// Saved-bill history (separate from the live draft).
-function loadHistory() {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const h = JSON.parse(raw);
-    return Array.isArray(h) ? h : [];
-  } catch {
-    return [];
-  }
-}
 
 export default function App() {
   const seed = useMemo(makeSeed, []);
@@ -107,10 +46,9 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
 
-  // "New tab" confirmation + backup import/export.
+  // "New tab" confirmation + backup import feedback.
   const [confirmNew, setConfirmNew] = useState(false);
   const [importMsg, setImportMsg] = useState("");
-  const importRef = useRef(null);
 
   // First-run onboarding (only when there's no saved draft and never onboarded).
   const [onboarding, setOnboarding] = useState(() => !saved && !hasOnboarded());
@@ -129,26 +67,15 @@ export default function App() {
 
   // Persist everything that matters whenever it changes.
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          billName, currency, mode, people, items,
-          totalAmount, taxVal, taxMode, tipVal, tipMode,
-        })
-      );
-    } catch {
-      /* storage unavailable (private mode / quota) — ignore */
-    }
+    saveState({
+      billName, currency, mode, people, items,
+      totalAmount, taxVal, taxMode, tipVal, tipMode,
+    });
   }, [billName, currency, mode, people, items, totalAmount, taxVal, taxMode, tipVal, tipMode]);
 
   // Persist the saved-bill history.
   useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    } catch {
-      /* storage unavailable — ignore */
-    }
+    saveHistory(history);
   }, [history]);
 
   // Capture the install prompt so we can offer an in-app "Install app" button.
@@ -333,17 +260,13 @@ export default function App() {
 
   /* ---------- backup (localStorage is evictable — give users a file) ---------- */
   const exportBackup = () => {
-    const data = {
-      app: "tabby",
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      draft: {
-        billName, currency, mode, people, items,
-        totalAmount, taxVal, taxMode, tipVal, tipMode,
-      },
-      history,
+    const draft = {
+      billName, currency, mode, people, items,
+      totalAmount, taxVal, taxMode, tipVal, tipMode,
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(buildBackup(draft, history), null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -366,23 +289,13 @@ export default function App() {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result);
-        const incoming = Array.isArray(data?.history) ? data.history : [];
-        const valid = incoming.filter(
-          (e) => e && typeof e === "object" && e.id && e.bill && typeof e.bill === "object"
-        );
-        const seen = new Set(history.map((e) => e.id));
-        const fresh = valid.filter((e) => !seen.has(e.id));
-        if (fresh.length === 0) {
-          flashImportMsg(valid.length ? "Those bills are already here." : "No bills found in that file.");
+        const { merged, added, found } = mergeHistory(history, data?.history);
+        if (added === 0) {
+          flashImportMsg(found ? "Those bills are already here." : "No bills found in that file.");
           return;
         }
-        // Merge, newest first (ISO timestamps sort lexicographically).
-        setHistory(
-          [...fresh, ...history].sort((a, b) =>
-            String(b.savedAt || "").localeCompare(String(a.savedAt || ""))
-          )
-        );
-        flashImportMsg(`Imported ${fresh.length} ${fresh.length === 1 ? "bill" : "bills"}.`);
+        setHistory(merged);
+        flashImportMsg(`Imported ${added} ${added === 1 ? "bill" : "bills"}.`);
       } catch {
         flashImportMsg("That doesn't look like a Tabby backup.");
       }
@@ -419,11 +332,7 @@ export default function App() {
     setPeople(seededPeople);
     setItems(demoItems());
     setMode("itemized");
-    try {
-      localStorage.setItem(ONBOARD_KEY, "1");
-    } catch {
-      /* ignore */
-    }
+    markOnboarded();
     setOnboarding(false);
   };
 
@@ -452,16 +361,6 @@ export default function App() {
     }
   };
 
-  const fmtSavedDate = (iso) => {
-    try {
-      return new Date(iso).toLocaleDateString("en-IN", {
-        day: "2-digit", month: "short", year: "numeric",
-      });
-    } catch {
-      return "";
-    }
-  };
-
   const hasPeople = people.length > 0;
   const ready =
     hasPeople && (mode === "itemized" ? computed.counted.length > 0 : parseNum(totalAmount) > 0);
@@ -480,8 +379,6 @@ export default function App() {
 
   return (
     <div className="bs">
-      <style>{CSS}</style>
-
       {onboarding && <Onboarding onDone={finishOnboarding} />}
 
       <div className="bs-shell">
@@ -829,166 +726,16 @@ export default function App() {
 
       {/* ================= HISTORY PANEL ================= */}
       {historyOpen && (
-        <div className="bs-overlay" onClick={() => setHistoryOpen(false)}>
-          <aside
-            className="bs-panel"
-            role="dialog"
-            aria-label="Saved bills"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="bs-panel-head">
-              <div className="bs-eyebrow">Saved bills</div>
-              <button
-                className="bs-x big"
-                onClick={() => setHistoryOpen(false)}
-                aria-label="Close history"
-              >×</button>
-            </div>
-            {history.length === 0 ? (
-              <p className="bs-hint">
-                No saved bills yet. Tap <strong>Save bill</strong> on a receipt to keep it here.
-              </p>
-            ) : (
-              <ul className="bs-history">
-                {history.map((e) => (
-                  <li key={e.id} className="bs-hentry">
-                    <button className="bs-hentry-main" onClick={() => loadBill(e)}>
-                      <span className="bs-hentry-name">{e.bill.billName || "Untitled"}</span>
-                      <span className="bs-hentry-meta">
-                        {fmtSavedDate(e.savedAt)} · {e.peopleCount}{" "}
-                        {e.peopleCount === 1 ? "guest" : "guests"}
-                      </span>
-                      <span className="bs-hentry-total">
-                        {(e.bill.currency || "₹") +
-                          (isFinite(e.total) ? e.total : 0).toLocaleString(
-                            e.bill.currency === "₹" ? "en-IN" : "en-US",
-                            { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                          )}
-                      </span>
-                    </button>
-                    <button
-                      className="bs-x"
-                      onClick={() => deleteBill(e.id)}
-                      aria-label={`Delete ${e.bill.billName || "bill"}`}
-                    >×</button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="bs-panel-foot">
-              <button className="bs-ghost" onClick={exportBackup}>Export backup</button>
-              <button className="bs-ghost" onClick={() => importRef.current?.click()}>
-                Import backup
-              </button>
-              <input
-                ref={importRef}
-                type="file"
-                accept=".json,application/json"
-                hidden
-                onChange={(e) => {
-                  importBackup(e.target.files?.[0]);
-                  e.target.value = "";
-                }}
-              />
-            </div>
-            <p className="bs-hint">
-              {importMsg ||
-                "Bills live only on this device — export a backup file to keep them safe."}
-            </p>
-          </aside>
-        </div>
+        <HistoryPanel
+          history={history}
+          onClose={() => setHistoryOpen(false)}
+          onLoad={loadBill}
+          onDelete={deleteBill}
+          onExport={exportBackup}
+          onImportFile={importBackup}
+          importMsg={importMsg}
+        />
       )}
-    </div>
-  );
-}
-
-/* first-run onboarding */
-function Onboarding({ onDone }) {
-  const [step, setStep] = useState(0);          // 0 = your name, 1 = friends
-  const [me, setMe] = useState("");
-  const [friends, setFriends] = useState([]);
-  const [draft, setDraft] = useState("");
-
-  const addFriend = () => {
-    const n = draft.trim();
-    if (!n) return;
-    setFriends((f) => [...f, n]);
-    setDraft("");
-  };
-  const removeFriend = (idx) => setFriends((f) => f.filter((_, i) => i !== idx));
-
-  const goNext = () => {
-    if (!me.trim()) return;
-    setStep(1);
-  };
-  const finish = () => {
-    // commit any half-typed friend, then seed: me first, then friends.
-    const pending = draft.trim();
-    const all = [me, ...friends, ...(pending ? [pending] : [])];
-    onDone(all);
-  };
-
-  return (
-    <div className="bs-onboard">
-      <div className="bs-onboard-card">
-        <span className="bs-mark big">⊟</span>
-        {step === 0 ? (
-          <>
-            <h2>Welcome to Tabby</h2>
-            <p className="bs-onboard-sub">Split any bill like a receipt. First — what's your name?</p>
-            <div className="bs-onboard-field">
-              <input
-                autoFocus
-                value={me}
-                onChange={(e) => setMe(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && goNext()}
-                placeholder="Your name"
-                aria-label="Your name"
-              />
-            </div>
-            <button className="bs-onboard-btn" onClick={goNext} disabled={!me.trim()}>
-              Next
-            </button>
-          </>
-        ) : (
-          <>
-            <h2>Who are you splitting with?</h2>
-            <p className="bs-onboard-sub">
-              Add the friends you're eating out with. You can always add more later.
-            </p>
-            <div className="bs-onboard-field">
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addFriend()}
-                placeholder="Friend's name"
-                aria-label="Friend's name"
-              />
-              <button className="bs-onboard-add" onClick={addFriend} aria-label="Add friend">+</button>
-            </div>
-            <div className="bs-onboard-chips">
-              <span className="bs-chip person">
-                <span className="bs-dot" style={{ background: PALETTE[0] }} />
-                {me.trim() || "You"}
-              </span>
-              {friends.map((f, idx) => (
-                <span className="bs-chip person" key={idx}>
-                  <span className="bs-dot" style={{ background: PALETTE[(idx + 1) % PALETTE.length] }} />
-                  {f}
-                  <button className="bs-x" onClick={() => removeFriend(idx)} aria-label={`Remove ${f}`}>×</button>
-                </span>
-              ))}
-            </div>
-            <button className="bs-onboard-btn" onClick={finish}>
-              Start splitting
-            </button>
-            <button className="bs-onboard-skip" onClick={() => onDone([me])}>
-              Just me for now
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -1042,245 +789,3 @@ function hashStr(s) {
   for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i);
   return h || 4827193;
 }
-
-const CSS = `
-/* paint the whole page (incl. area behind the status bar / browser chrome) beige */
-html, body, #root{ background:#ECEBE3; }
-
-.bs {
-  --paper:#ECEBE3; --ink:#20201C; --pen:#2E3A66; --stamp:#B5362A;
-  --muted:#8C897C; --line:#CFCCC0; --receipt:#F8F7F2;
-  --disp:'Space Grotesk', system-ui, sans-serif;
-  --mono:'IBM Plex Mono', ui-monospace, monospace;
-  font-family:var(--disp); color:var(--ink); background:var(--paper);
-  min-height:100vh; -webkit-font-smoothing:antialiased; position:relative;
-}
-.bs *{ box-sizing:border-box; }
-.bs::before{
-  content:""; position:fixed; inset:0; pointer-events:none; opacity:.5; z-index:0;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-}
-.bs-shell{ position:relative; z-index:1; max-width:1040px; margin:0 auto; padding:clamp(16px,4vw,40px); }
-
-.bs-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:24px; flex-wrap:wrap; }
-.bs-title{ display:flex; align-items:center; gap:12px; }
-.bs-mark{ font-size:30px; line-height:1; color:var(--pen); }
-.bs-title h1{ font-size:24px; font-weight:700; letter-spacing:-.02em; margin:0; }
-.bs-title p{ margin:2px 0 0; font-size:13px; color:var(--muted); font-family:var(--mono); }
-.bs-head-actions{ display:flex; align-items:center; gap:8px; }
-.bs-cur select{
-  font-family:var(--mono); font-size:15px; border:1px solid var(--line); background:var(--receipt);
-  border-radius:8px; padding:8px 10px; color:var(--ink); cursor:pointer;
-}
-.bs-ghost{
-  font-family:var(--mono); font-size:13px; border:1px solid var(--line); background:transparent;
-  border-radius:8px; padding:9px 12px; color:var(--ink); cursor:pointer; transition:background .15s;
-}
-.bs-ghost:hover{ background:#fff; }
-
-.bs-grid{ display:grid; gap:24px; grid-template-columns:1fr; align-items:start; }
-@media(min-width:860px){ .bs-grid{ grid-template-columns:1.04fr .96fr; } .bs-receipt-wrap{ position:sticky; top:24px; } }
-
-.bs-card{
-  background:var(--receipt); border:1px solid var(--line); border-radius:16px;
-  padding:clamp(16px,3vw,24px);
-  box-shadow:0 1px 0 rgba(0,0,0,.03), 0 24px 50px -34px rgba(32,32,28,.55);
-}
-.bs-namewrap{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; border-bottom:1px dashed var(--line); padding-bottom:14px; margin-bottom:16px; }
-.bs-name{
-  font-family:var(--disp); font-weight:600; font-size:22px; letter-spacing:-.01em;
-  border:none; background:transparent; color:var(--ink); width:100%; padding:0;
-}
-.bs-name:focus-visible{ outline:none; }
-.bs-date{ font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; }
-
-.bs-eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
-.bs-block{ margin-top:20px; }
-.bs-hint{ font-family:var(--mono); font-size:12px; color:var(--muted); margin:10px 0 0; }
-
-.bs-seg{ display:inline-flex; border:1px solid var(--line); border-radius:10px; padding:3px; background:#fff; gap:3px; }
-.bs-seg button{
-  font-family:var(--disp); font-weight:500; font-size:14px; border:none; background:transparent;
-  padding:8px 18px; border-radius:7px; color:var(--muted); cursor:pointer; transition:.15s;
-}
-.bs-seg button.on{ background:var(--pen); color:#fff; }
-.bs-seg.mini button{ padding:5px 12px; font-size:12.5px; }
-
-.bs-people{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-.bs-chip{
-  display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line);
-  border-radius:999px; padding:7px 12px; font-size:13px; font-family:var(--disp); background:#fff; line-height:1;
-}
-.bs-chip.person{ padding-right:8px; }
-.bs-dot{ width:9px; height:9px; border-radius:50%; flex:none; display:inline-block; }
-.bs-x{ border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:16px; line-height:1; padding:0 2px; }
-.bs-x:hover{ color:var(--stamp); }
-.bs-x.big{ font-size:20px; align-self:center; }
-.bs-add-person{ display:inline-flex; align-items:center; border:1px dashed var(--line); border-radius:999px; overflow:hidden; background:transparent; }
-.bs-add-person input{ border:none; background:transparent; font-family:var(--disp); font-size:13px; padding:7px 4px 7px 12px; width:108px; color:var(--ink); }
-.bs-add-person input:focus-visible{ outline:none; }
-.bs-add-person button{ border:none; background:transparent; font-size:18px; color:var(--pen); cursor:pointer; padding:4px 12px 6px; }
-
-.bs-items{ display:flex; flex-direction:column; gap:10px; }
-.bs-item{ border:1px dashed var(--line); border-radius:12px; padding:12px; background:rgba(255,255,255,.4); }
-.bs-item-top{ display:flex; gap:10px; align-items:center; }
-.bs-item-name{ flex:1; min-width:0; border:none; border-bottom:1px solid var(--line); background:transparent; font-family:var(--disp); font-size:15px; padding:6px 2px; color:var(--ink); }
-.bs-item-name:focus-visible{ outline:none; border-bottom-color:var(--pen); }
-.bs-amount{ display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line); border-radius:8px; background:#fff; padding:0 10px; }
-.bs-amount span{ font-family:var(--mono); font-size:13px; color:var(--muted); }
-.bs-amount input{ border:none; background:transparent; font-family:var(--mono); font-size:15px; padding:9px 0; width:78px; text-align:right; color:var(--ink); font-variant-numeric:tabular-nums; }
-.bs-amount input:focus-visible{ outline:none; }
-.bs-amount.big{ padding:2px 14px; }
-.bs-amount.big input{ width:100%; min-width:120px; font-size:22px; text-align:left; padding:12px 0; }
-
-.bs-item-split{ display:flex; align-items:center; gap:10px; margin-top:11px; flex-wrap:wrap; }
-.bs-shared-note{ font-family:var(--mono); font-size:11.5px; color:var(--muted); letter-spacing:.02em; }
-
-.bs-assign{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
-.bs-chip.mini{ padding:5px 9px; font-size:12px; cursor:pointer; transition:.12s; opacity:.55; }
-.bs-chip.mini.on{ opacity:1; background:#fff; font-weight:500; }
-.bs-allbtn{ font-family:var(--mono); font-size:11px; letter-spacing:.04em; border:1px solid var(--line); background:transparent; border-radius:999px; padding:5px 10px; color:var(--muted); cursor:pointer; }
-.bs-allbtn:hover{ color:var(--ink); }
-.bs-additem{ font-family:var(--mono); font-size:13px; border:1px dashed var(--line); background:transparent; border-radius:12px; padding:12px; color:var(--muted); cursor:pointer; transition:.15s; }
-.bs-additem:hover{ color:var(--pen); border-color:var(--pen); background:rgba(46,58,102,.04); }
-
-.bs-tt{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.bs-adj-row{ display:flex; align-items:center; justify-content:space-between; }
-.bs-adj .bs-eyebrow{ margin-bottom:0; }
-.bs-adj .bs-amount{ margin-top:10px; width:100%; }
-.bs-adj .bs-amount input{ width:100%; }
-.bs-quick{ display:flex; gap:5px; margin-top:8px; }
-.bs-quick button{ flex:1; font-family:var(--mono); font-size:12px; border:1px solid var(--line); background:#fff; border-radius:6px; padding:6px 0; color:var(--muted); cursor:pointer; transition:.12s; }
-.bs-quick button.on{ background:var(--pen); color:#fff; border-color:var(--pen); }
-
-/* ---------------- receipt ---------------- */
-.bs-receipt{ background:var(--receipt); border-radius:5px; padding:8px clamp(18px,3vw,30px); position:relative; box-shadow:0 26px 56px -30px rgba(0,0,0,.6); font-family:var(--mono); }
-.bs-perf{ position:relative; height:18px; display:flex; align-items:center; }
-.bs-perf .line{ flex:1; border-top:2px dashed var(--line); margin:0 6px; }
-.bs-perf .notch{ width:16px; height:16px; border-radius:50%; background:var(--paper); flex:none; }
-.bs-perf .notch.l{ margin-left:-30px; } .bs-perf .notch.r{ margin-right:-30px; }
-
-.bs-r-head{ text-align:center; padding:6px 0 14px; }
-.bs-r-name{ font-family:var(--disp); font-weight:700; font-size:18px; letter-spacing:.08em; }
-.bs-r-meta{ font-size:11px; color:var(--muted); letter-spacing:.04em; margin-top:4px; }
-.bs-r-empty{ text-align:center; color:var(--muted); font-size:13px; padding:34px 10px; line-height:1.6; }
-.bs-r-section{ padding:6px 0; }
-.bs-person-block{ padding:7px 0; }
-.bs-person-block + .bs-person-block{ border-top:1px dotted var(--line); }
-
-.bs-rrow{ display:flex; align-items:flex-end; gap:6px; padding:3px 0; font-size:14px; }
-.bs-rrow.sm{ font-size:11.5px; color:var(--muted); padding:1px 0; }
-.bs-rrow.ind{ padding-left:14px; }
-.bs-rrow .lab{ display:inline-flex; align-items:center; gap:7px; }
-.bs-rrow .dots{ flex:1; border-bottom:1px dotted var(--line); transform:translateY(-3px); min-width:14px; }
-.bs-rrow .val{ font-variant-numeric:tabular-nums; white-space:nowrap; }
-.bs-rrow .val.b{ font-weight:600; }
-.bs-rrow .val.red{ color:var(--stamp); }
-.bs-rrow .lab .bs-dot{ margin-bottom:1px; }
-
-.bs-rule{ height:1px; background:var(--line); margin:6px 0; }
-.bs-rule.double{ height:0; border-top:1px solid var(--ink); border-bottom:1px solid var(--ink); padding-top:3px; opacity:.65; }
-.bs-r-section:last-of-type .bs-rrow:last-child{ font-size:17px; padding-top:6px; }
-
-.bs-warn{ font-size:11px; color:var(--stamp); background:rgba(181,54,42,.07); border:1px solid rgba(181,54,42,.2); border-radius:6px; padding:8px 10px; margin-top:12px; line-height:1.5; }
-.bs-r-note{ font-size:10.5px; color:var(--muted); text-align:center; line-height:1.5; padding:6px 8px 0; }
-
-.bs-stamp{ position:absolute; right:18px; bottom:96px; font-family:var(--disp); font-weight:700; font-size:18px; letter-spacing:.12em; color:var(--stamp); border:2px solid var(--stamp); border-radius:6px; padding:5px 9px; transform:rotate(-9deg); opacity:.16; pointer-events:none; }
-.bs-barcode{ height:46px; margin:18px 0 6px; background-image:repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 9px, var(--ink) 9px 11px, transparent 11px 13px, var(--ink) 13px 16px, transparent 16px 18px); opacity:.82; }
-.bs-r-foot{ text-align:center; font-size:10px; letter-spacing:.18em; color:var(--muted); padding-bottom:8px; }
-
-.bs-r-actions{ display:flex; gap:8px; margin:6px 0 4px; }
-.bs-copy{ flex:1; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:8px; padding:13px; cursor:pointer; transition:.15s; }
-.bs-copy:hover{ background:transparent; color:var(--ink); }
-.bs-copy.ghost{ background:transparent; color:var(--ink); }
-.bs-copy.ghost:hover{ background:var(--ink); color:var(--receipt); }
-
-/* iOS install hint */
-.bs-ios-hint{ position:relative; font-family:var(--mono); font-size:12.5px; line-height:1.5; color:var(--ink); background:var(--receipt); border:1px solid var(--line); border-radius:10px; padding:12px 36px 12px 14px; margin:0 0 20px; }
-.bs-ios-hint .bs-x{ position:absolute; top:8px; right:8px; }
-
-/* history panel */
-.bs-overlay{ position:fixed; inset:0; z-index:50; background:rgba(32,32,28,.34); display:flex; justify-content:flex-end; animation:bs-fade .15s ease; }
-.bs-panel{ width:min(380px,90vw); height:100%; background:var(--paper); border-left:1px solid var(--line); box-shadow:-24px 0 50px -34px rgba(0,0,0,.6); padding:clamp(16px,4vw,24px); overflow-y:auto; animation:bs-slide .2s ease; }
-.bs-panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.bs-panel-head .bs-eyebrow{ margin-bottom:0; }
-.bs-history{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-.bs-hentry{ display:flex; align-items:stretch; gap:6px; border:1px solid var(--line); border-radius:12px; background:var(--receipt); overflow:hidden; }
-.bs-hentry-main{ flex:1; display:grid; grid-template-columns:1fr auto; grid-template-areas:"name total" "meta total"; align-items:center; gap:0 10px; text-align:left; border:none; background:transparent; padding:12px 6px 12px 14px; cursor:pointer; transition:background .12s; }
-.bs-hentry-main:hover{ background:#fff; }
-.bs-hentry-name{ grid-area:name; font-family:var(--disp); font-weight:600; font-size:15px; }
-.bs-hentry-meta{ grid-area:meta; font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:2px; }
-.bs-hentry-total{ grid-area:total; font-family:var(--mono); font-size:15px; font-variant-numeric:tabular-nums; }
-.bs-hentry > .bs-x{ padding:0 12px; }
-.bs-panel-foot{ display:flex; gap:8px; margin-top:18px; padding-top:16px; border-top:1px dashed var(--line); }
-.bs-panel-foot .bs-ghost{ flex:1; }
-@keyframes bs-fade{ from{ opacity:0; } to{ opacity:1; } }
-@keyframes bs-slide{ from{ transform:translateX(16px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
-
-/* new-tab confirm dialog */
-.bs-overlay.center{ justify-content:center; align-items:center; padding:20px; }
-.bs-confirm{
-  width:min(400px,100%); background:var(--receipt); border:1px solid var(--line);
-  border-radius:16px; padding:clamp(20px,5vw,26px);
-  box-shadow:0 30px 60px -34px rgba(32,32,28,.45); animation:bs-pop .22s ease;
-}
-.bs-confirm h3{ font-family:var(--disp); font-weight:700; font-size:19px; letter-spacing:-.01em; margin:0 0 6px; }
-.bs-confirm p{ font-family:var(--mono); font-size:12.5px; line-height:1.55; color:var(--muted); margin:0 0 16px; }
-.bs-confirm .bs-copy{ display:block; width:100%; }
-.bs-confirm .bs-copy + .bs-copy{ margin-top:8px; }
-.bs-confirm-cancel{ display:block; width:100%; margin-top:8px; font-family:var(--mono); font-size:12px; border:none; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
-.bs-confirm-cancel:hover{ color:var(--ink); }
-
-/* onboarding — immersive, full-bleed (covers safe-area insets in PWA) */
-.bs-onboard{
-  position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
-  height:100dvh; background:var(--paper); overflow-y:auto; animation:bs-fade .18s ease;
-  padding:max(24px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right))
-          max(24px,env(safe-area-inset-bottom)) max(20px,env(safe-area-inset-left));
-}
-/* same paper grain as the app, so the opaque backdrop isn't a flat block */
-.bs-onboard::before{
-  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-}
-.bs-onboard-card{
-  position:relative; width:min(420px,100%); background:var(--receipt); border:1px solid var(--line);
-  border-radius:18px; padding:clamp(22px,5vw,32px); box-shadow:0 30px 60px -34px rgba(32,32,28,.45);
-  animation:bs-pop .22s ease;
-}
-.bs-onboard-card .bs-mark.big{ display:block; font-size:38px; color:var(--pen); margin-bottom:8px; }
-.bs-onboard-card h2{ font-family:var(--disp); font-weight:700; font-size:22px; letter-spacing:-.02em; margin:0 0 6px; }
-.bs-onboard-sub{ font-family:var(--mono); font-size:13px; line-height:1.55; color:var(--muted); margin:0 0 18px; }
-.bs-onboard-field{ display:flex; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; background:#fff; padding:0 6px 0 14px; transition:border-color .15s, box-shadow .15s; }
-/* highlight the wrapper on focus, not the inner input — avoids a double outline */
-.bs-onboard-field:focus-within{ border-color:var(--pen); box-shadow:0 0 0 3px rgba(46,58,102,.16); }
-.bs-onboard-field input{ flex:1; min-width:0; border:none; outline:none; background:transparent; font-family:var(--disp); font-size:16px; padding:13px 0; color:var(--ink); }
-.bs-onboard-field input:focus, .bs-onboard-field input:focus-visible{ outline:none; }
-.bs-onboard-add{ border:none; background:transparent; font-size:22px; color:var(--pen); cursor:pointer; padding:4px 10px 6px; }
-.bs-onboard-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
-.bs-onboard-btn{ width:100%; margin-top:18px; font-family:var(--mono); font-size:13px; letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--ink); background:var(--ink); color:var(--receipt); border-radius:9px; padding:14px; cursor:pointer; transition:.15s; }
-.bs-onboard-btn:hover:not(:disabled){ background:transparent; color:var(--ink); }
-.bs-onboard-btn:disabled{ opacity:.4; cursor:not-allowed; }
-.bs-onboard-skip{ width:100%; margin-top:8px; font-family:var(--mono); font-size:12px; border:none; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
-.bs-onboard-skip:hover{ color:var(--ink); }
-/* on phones, go edge-to-edge: no floating card, just immersive content */
-@media(max-width:560px){
-  .bs-onboard{ align-items:stretch; padding:0; }
-  .bs-onboard-card{ width:100%; max-width:none; border:none; border-radius:0; box-shadow:none; background:transparent; display:flex; flex-direction:column; justify-content:center; padding:max(28px,env(safe-area-inset-top)) 24px max(28px,env(safe-area-inset-bottom)); }
-  .bs-onboard-card .bs-mark.big{ font-size:44px; }
-  .bs-onboard-card h2{ font-size:26px; }
-  .bs-onboard-sub{ font-size:14px; }
-}
-@keyframes bs-pop{ from{ transform:translateY(10px) scale(.98); opacity:.5; } to{ transform:translateY(0) scale(1); opacity:1; } }
-
-.bs input:focus-visible, .bs button:focus-visible, .bs select:focus-visible{ outline:2px solid var(--pen); outline-offset:2px; }
-/* inputs wrapped in a field that shows its own focus style shouldn't also get the blanket ring */
-.bs-onboard-field input:focus, .bs-onboard-field input:focus-visible,
-.bs-amount input:focus, .bs-amount input:focus-visible{ outline:none; }
-
-@media(max-width:520px){
-  .bs-tt{ grid-template-columns:1fr; }
-  .bs-stamp{ bottom:104px; right:10px; }
-}
-@media(prefers-reduced-motion:reduce){ .bs *{ transition:none !important; } .bs-overlay, .bs-panel, .bs-onboard, .bs-onboard-card{ animation:none !important; } }
-`;
