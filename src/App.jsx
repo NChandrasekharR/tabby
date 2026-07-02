@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 
 /* ------------------------------------------------------------------ *
  * Tabby — a bill splitter built like a receipt.
@@ -109,6 +109,11 @@ export default function App() {
   const [history, setHistory] = useState(loadHistory);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+
+  // "New tab" confirmation + backup import/export.
+  const [confirmNew, setConfirmNew] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const importRef = useRef(null);
 
   // First-run onboarding (only when there's no saved draft and never onboarded).
   const [onboarding, setOnboarding] = useState(() => !saved && !hasOnboarded());
@@ -242,6 +247,25 @@ export default function App() {
     setTotalAmount("");
     setTaxVal("");
     setTipVal("");
+    setConfirmNew(false);
+  };
+
+  // Anything on the worksheet that would hurt to lose?
+  const hasBillContent =
+    items.some((i) => parseNum(i.price) > 0) ||
+    (mode === "even" && parseNum(totalAmount) > 0);
+
+  const requestNewTab = () => {
+    if (!hasBillContent && people.length === 0) {
+      resetAll();
+      return;
+    }
+    setConfirmNew(true);
+  };
+
+  const saveAndReset = () => {
+    saveBill();
+    resetAll();
   };
 
   /* ---------- math ---------- */
@@ -366,6 +390,65 @@ export default function App() {
 
   const deleteBill = (id) => setHistory((h) => h.filter((e) => e.id !== id));
 
+  /* ---------- backup (localStorage is evictable — give users a file) ---------- */
+  const exportBackup = () => {
+    const data = {
+      app: "tabby",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      draft: {
+        billName, currency, mode, people, items,
+        totalAmount, taxVal, taxMode, tipVal, tipMode,
+      },
+      history,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tabby-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const flashImportMsg = (msg) => {
+    setImportMsg(msg);
+    setTimeout(() => setImportMsg(""), 3000);
+  };
+
+  const importBackup = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => flashImportMsg("Couldn't read that file.");
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const incoming = Array.isArray(data?.history) ? data.history : [];
+        const valid = incoming.filter(
+          (e) => e && typeof e === "object" && e.id && e.bill && typeof e.bill === "object"
+        );
+        const seen = new Set(history.map((e) => e.id));
+        const fresh = valid.filter((e) => !seen.has(e.id));
+        if (fresh.length === 0) {
+          flashImportMsg(valid.length ? "Those bills are already here." : "No bills found in that file.");
+          return;
+        }
+        // Merge, newest first (ISO timestamps sort lexicographically).
+        setHistory(
+          [...fresh, ...history].sort((a, b) =>
+            String(b.savedAt || "").localeCompare(String(a.savedAt || ""))
+          )
+        );
+        flashImportMsg(`Imported ${fresh.length} ${fresh.length === 1 ? "bill" : "bills"}.`);
+      } catch {
+        flashImportMsg("That doesn't look like a Tabby backup.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   /* ---------- install ---------- */
   const installApp = async () => {
     if (installEvt) {
@@ -487,7 +570,7 @@ export default function App() {
             <button className="bs-ghost" onClick={() => setHistoryOpen(true)}>
               History{history.length ? ` · ${history.length}` : ""}
             </button>
-            <button className="bs-ghost" onClick={resetAll}>New tab</button>
+            <button className="bs-ghost" onClick={requestNewTab}>New tab</button>
           </div>
         </header>
 
@@ -767,6 +850,34 @@ export default function App() {
         </div>
       </div>
 
+      {/* ================= NEW TAB CONFIRM ================= */}
+      {confirmNew && (
+        <div className="bs-overlay center" onClick={() => setConfirmNew(false)}>
+          <div
+            className="bs-confirm"
+            role="dialog"
+            aria-label="Start a new tab"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Start a new tab?</h3>
+            <p>
+              {hasBillContent
+                ? "This clears the current bill and everyone on it. Save it to history first?"
+                : "This clears the people on the current tab."}
+            </p>
+            {hasBillContent && (
+              <button className="bs-copy" onClick={saveAndReset}>Save & start new</button>
+            )}
+            <button className="bs-copy ghost" onClick={resetAll}>
+              {hasBillContent ? "Start new without saving" : "Start new"}
+            </button>
+            <button className="bs-confirm-cancel" onClick={() => setConfirmNew(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ================= HISTORY PANEL ================= */}
       {historyOpen && (
         <div className="bs-overlay" onClick={() => setHistoryOpen(false)}>
@@ -815,6 +926,26 @@ export default function App() {
                 ))}
               </ul>
             )}
+            <div className="bs-panel-foot">
+              <button className="bs-ghost" onClick={exportBackup}>Export backup</button>
+              <button className="bs-ghost" onClick={() => importRef.current?.click()}>
+                Import backup
+              </button>
+              <input
+                ref={importRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => {
+                  importBackup(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            <p className="bs-hint">
+              {importMsg ||
+                "Bills live only on this device — export a backup file to keep them safe."}
+            </p>
           </aside>
         </div>
       )}
@@ -1131,8 +1262,24 @@ html, body, #root{ background:#ECEBE3; }
 .bs-hentry-meta{ grid-area:meta; font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:2px; }
 .bs-hentry-total{ grid-area:total; font-family:var(--mono); font-size:15px; font-variant-numeric:tabular-nums; }
 .bs-hentry > .bs-x{ padding:0 12px; }
+.bs-panel-foot{ display:flex; gap:8px; margin-top:18px; padding-top:16px; border-top:1px dashed var(--line); }
+.bs-panel-foot .bs-ghost{ flex:1; }
 @keyframes bs-fade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes bs-slide{ from{ transform:translateX(16px); opacity:.4; } to{ transform:translateX(0); opacity:1; } }
+
+/* new-tab confirm dialog */
+.bs-overlay.center{ justify-content:center; align-items:center; padding:20px; }
+.bs-confirm{
+  width:min(400px,100%); background:var(--receipt); border:1px solid var(--line);
+  border-radius:16px; padding:clamp(20px,5vw,26px);
+  box-shadow:0 30px 60px -34px rgba(32,32,28,.45); animation:bs-pop .22s ease;
+}
+.bs-confirm h3{ font-family:var(--disp); font-weight:700; font-size:19px; letter-spacing:-.01em; margin:0 0 6px; }
+.bs-confirm p{ font-family:var(--mono); font-size:12.5px; line-height:1.55; color:var(--muted); margin:0 0 16px; }
+.bs-confirm .bs-copy{ display:block; width:100%; }
+.bs-confirm .bs-copy + .bs-copy{ margin-top:8px; }
+.bs-confirm-cancel{ display:block; width:100%; margin-top:8px; font-family:var(--mono); font-size:12px; border:none; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
+.bs-confirm-cancel:hover{ color:var(--ink); }
 
 /* onboarding — immersive, full-bleed (covers safe-area insets in PWA) */
 .bs-onboard{
