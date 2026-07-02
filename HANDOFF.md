@@ -88,6 +88,16 @@ Decision: don't rewrite v1 — write **PRD v2** rebased on the real stack and go
 
 ## 7. OPEN ISSUES — ranked (from the full-project review)
 
+> **Update (2 Jul 2026, Phase A session):** Issues #1–#4 are DONE, shipped as
+> `fd919c8` (New-tab confirm-or-save dialog + backup export/import in the History
+> panel), `fd3fcab` (split math extracted to `src/lib/split.js` with 17 vitest
+> cases — `npm test` — and the organizer-absorbs-rounding rule from PRD v2 §5,
+> stated in a receipt footnote), and `dbbba2f` (App.jsx 1,189 → 791 lines;
+> new `src/lib/{storage,constants,seed}.js`, `src/styles.css`,
+> `src/components/{Onboarding,HistoryPanel}.jsx`). All verified in preview.
+> Remaining below: #5 (verify Vercel deploy) and #6 (nice-to-haves).
+> Next: Phase B (occasion count + extraction spike).
+
 1. **🔴 Data-loss landmine:** "New tab" wipes the current bill instantly, no confirmation, and the wipe auto-persists. With real users this WILL lose someone's bill. Fix: confirm before reset, or auto-snapshot to history on "New tab." Also: localStorage is evictable — add an export/backup path. **This is the agreed next work item.**
 2. **🔴 Zero tests on the split math.** The entire product's correctness lives in one untested `useMemo`. Extract to a pure module + ~12 test cases before any new feature.
 3. **🟡 Rounding fairness unimplemented:** displayed per-person shares can sum a paisa or two off the displayed total. PRD's answer (organizer absorbs remainder, stated in footnote) is right and not built.
