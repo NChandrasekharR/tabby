@@ -96,7 +96,9 @@ Decision: don't rewrite v1 — write **PRD v2** rebased on the real stack and go
 > new `src/lib/{storage,constants,seed}.js`, `src/styles.css`,
 > `src/components/{Onboarding,HistoryPanel}.jsx`). All verified in preview.
 > Remaining below: #5 (verify Vercel deploy) and #6 (nice-to-haves).
-> Next: Phase B (occasion count + extraction spike).
+> Next: Phase B (occasion count + extraction spike). The extraction spike has a
+> full execution plan at `spike/PLAN.md`, written to be handed to any coding
+> agent cold — Chandra's manual prerequisites are its §2.
 
 1. **🔴 Data-loss landmine:** "New tab" wipes the current bill instantly, no confirmation, and the wipe auto-persists. With real users this WILL lose someone's bill. Fix: confirm before reset, or auto-snapshot to history on "New tab." Also: localStorage is evictable — add an export/backup path. **This is the agreed next work item.**
 2. **🔴 Zero tests on the split math.** The entire product's correctness lives in one untested `useMemo`. Extract to a pure module + ~12 test cases before any new feature.

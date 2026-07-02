@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Phase B spike — receipt photos are personal data; extractions/reviews contain them
+spike/receipts/
+spike/out/
+spike/review/
